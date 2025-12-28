@@ -8,55 +8,64 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ===== Cobalt API Support (YouTube, TikTok, Instagram, etc.) =====
+// Updated to use Cobalt v10+ API (v7 API shut down Nov 2024)
 async function downloadViaCobalt(url, quality = '1080') {
-    // Try Cobalt API - supports many platforms including YouTube
-    try {
-        console.log('🔷 Attempting Cobalt API for:', url);
-        const response = await fetch('https://api.cobalt.tools/api/json', {
-            method: 'POST',
-            headers: {
-                'Accept': 'application/json',
-                'Content-Type': 'application/json',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            },
-            body: JSON.stringify({
-                url: url,
-                vCodec: 'h264',
-                vQuality: quality,
-                aFormat: 'mp3',
-                isNoTTWatermark: true,
-                isAudioOnly: false
-            })
-        });
+    // Try multiple Cobalt instances
+    const cobaltInstances = [
+        'https://cobalt.api.timelessnesses.me/api',
+        'https://api.cobalt.tux93.de/api',
+        'https://cobalt-api.ayo.tf',
+        'https://co.eepy.today/api'
+    ];
 
-        const data = await response.json();
-        console.log('Cobalt response:', JSON.stringify(data).substring(0, 200));
+    for (const instance of cobaltInstances) {
+        try {
+            console.log(`🔷 Trying Cobalt instance: ${instance}`);
+            const response = await fetch(`${instance}/json`, {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'Mozilla/5.0'
+                },
+                body: JSON.stringify({
+                    url: url,
+                    vCodec: 'h264',
+                    vQuality: quality,
+                    aFormat: 'mp3',
+                    isNoTTWatermark: true,
+                    dubLang: false
+                })
+            });
 
-        if (data && (data.url || data.stream)) {
-            console.log('✅ Cobalt success');
-            return {
-                success: true,
-                url: data.url || data.stream,
-                audio: data.audio,
-                filename: data.filename || 'video.mp4'
-            };
+            const data = await response.json();
+            console.log('Cobalt response:', JSON.stringify(data).substring(0, 200));
+
+            if (data && (data.url || data.stream)) {
+                console.log(`✅ Cobalt success from ${instance}`);
+                return {
+                    success: true,
+                    url: data.url || data.stream,
+                    audio: data.audio,
+                    filename: data.filename || 'video.mp4'
+                };
+            }
+
+            // Handle picker (multiple streams)
+            if (data && data.picker && data.picker.length > 0) {
+                console.log('✅ Cobalt picker success');
+                return {
+                    success: true,
+                    url: data.picker[0].url,
+                    filename: 'video.mp4'
+                };
+            }
+        } catch (error) {
+            console.log(`Cobalt ${instance} failed:`, error.message);
         }
-
-        // Handle picker (multiple streams)
-        if (data && data.picker && data.picker.length > 0) {
-            console.log('✅ Cobalt picker success');
-            return {
-                success: true,
-                url: data.picker[0].url,
-                filename: 'video.mp4'
-            };
-        }
-
-        return { success: false, error: data.text || 'Cobalt failed' };
-    } catch (error) {
-        console.error('Cobalt API error:', error.message);
-        return { success: false, error: error.message };
     }
+
+    return { success: false, error: 'All Cobalt instances failed' };
 }
 
 // Legacy TikTok function (uses downloadViaCobalt internally)
@@ -112,11 +121,13 @@ function extractYouTubeId(url) {
 
 // ===== MEGA YouTube Download System - 10+ APIs in Parallel =====
 
-// API 1: Cobalt (Multiple instances)
+// API 1: Cobalt (Multiple working instances - v10+)
 async function tryCobalt(url, quality) {
     const endpoints = [
-        'https://api.cobalt.tools/api/json',
-        'https://co.wuk.sh/api/json'
+        'https://cobalt.api.timelessnesses.me/api/json',
+        'https://api.cobalt.tux93.de/api/json',
+        'https://cobalt-api.ayo.tf/json',
+        'https://co.eepy.today/api/json'
     ];
 
     for (const endpoint of endpoints) {
@@ -126,9 +137,9 @@ async function tryCobalt(url, quality) {
                 headers: {
                     'Accept': 'application/json',
                     'Content-Type': 'application/json',
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    'User-Agent': 'Mozilla/5.0'
                 },
-                body: JSON.stringify({ url, vCodec: 'h264', vQuality: quality, aFormat: 'mp3' })
+                body: JSON.stringify({ url, vCodec: 'h264', vQuality: quality, aFormat: 'mp3', dubLang: false })
             });
             const data = await response.json();
             if (data?.url || data?.stream) {
@@ -815,10 +826,35 @@ app.post('/api/download/cobalt', async (req, res) => {
 
     try {
         let result;
+        const isTikTok = url.includes('tiktok.com') || url.includes('vm.tiktok.com');
 
         // Use master YouTube function for YouTube URLs
         if (isYouTubeUrl(url)) {
             result = await downloadYouTubeVideo(url, quality);
+        } else if (isTikTok) {
+            // For TikTok: Try Cobalt first, then TikWM
+            result = await downloadViaCobalt(url, quality);
+
+            if (!result.success) {
+                console.log('🎵 Cobalt failed for TikTok, trying TikWM...');
+                try {
+                    const tikwmRes = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(url)}`, {
+                        headers: { 'User-Agent': 'Mozilla/5.0' }
+                    });
+                    const tikwmData = await tikwmRes.json();
+
+                    if (tikwmData && tikwmData.data && tikwmData.data.play) {
+                        console.log('✅ TikWM success!');
+                        result = {
+                            success: true,
+                            url: tikwmData.data.play,
+                            filename: `tiktok_${tikwmData.data.id || Date.now()}.mp4`
+                        };
+                    }
+                } catch (tikwmErr) {
+                    console.log('TikWM also failed:', tikwmErr.message);
+                }
+            }
         } else {
             // For other platforms, use Cobalt directly
             result = await downloadViaCobalt(url, quality);
