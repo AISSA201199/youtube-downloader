@@ -36,7 +36,7 @@ const state = {
     }
 };
 
-const API_BASE = 'http://localhost:3000/api';
+const API_BASE = '/api';
 
 // ===== DOM Elements Cache =====
 const $ = (id) => document.getElementById(id);
@@ -543,13 +543,13 @@ async function startDownload() {
             data = await response.json();
 
             if (!response.ok || !data.success) {
-                throw new Error(data.error || 'فشل تحميل TikTok');
+                console.warn('TikTok API failed, falling back to yt-dlp...');
+                // Fallthrough to normal download
+            } else {
+                updateProgress(100, 'اكتمل!', '', '', '');
+                downloadCompleted(data.downloadUrl);
+                return;
             }
-
-            // TikTok download is usually instant
-            updateProgress(100, 'اكتمل!', '', '', '');
-            downloadCompleted();
-            return;
         }
 
         // التحميل العادي
@@ -562,6 +562,13 @@ async function startDownload() {
 
         data = await response.json();
         if (!response.ok) throw new Error(data.error || 'فشل التحميل');
+
+        // If a direct download URL is provided, complete immediately
+        if (data.downloadUrl) {
+            updateProgress(100, 'اكتمل!', '', '', '');
+            downloadCompleted(data.downloadUrl);
+            return;
+        }
 
         state.currentDownloadId = data.downloadId;
         startProgressPolling();
@@ -645,7 +652,9 @@ function startProgressPolling() {
                 );
             } else if (data.status === 'completed') {
                 stopProgressPolling();
-                downloadCompleted();
+            } else if (data.status === 'completed') {
+                stopProgressPolling();
+                downloadCompleted(data.downloadUrl);
             } else if (data.status === 'error') {
                 stopProgressPolling();
                 showError(`فشل التحميل: ${data.error || 'خطأ غير معروف'}`);
@@ -666,7 +675,16 @@ function stopProgressPolling() {
     }
 }
 
-function downloadCompleted() {
+function downloadCompleted(downloadUrl) {
+    if (downloadUrl) {
+        // Trigger browser download
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = '';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    }
     updateProgress(100, 'اكتمل!', '', '', '');
     addToHistory(state.currentVideo);
     updateStats();
