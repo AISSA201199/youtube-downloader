@@ -117,6 +117,8 @@ app.get('/api/info', async (req, res) => {
             '--add-header', 'Accept-Language:en-US,en;q=0.9',
             // Force IPv4 (some cloud providers have IPv6 issues)
             '--force-ipv4',
+            // YOUTUBE: Use Android client to bypass bot detection
+            '--extractor-args', 'youtube:player_client=android,web',
             // Important for TikTok, Instagram, etc.
             '--extractor-args', 'tiktok:api_hostname=api22-normal-c-useast1a.tiktokv.com',
         ];
@@ -276,6 +278,8 @@ app.post('/api/download', async (req, res) => {
         '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         '--referer', 'https://www.youtube.com/',
         '--force-ipv4',
+        // YOUTUBE: Use Android client to bypass bot detection
+        '--extractor-args', 'youtube:player_client=android,web',
         '-o', path.join(downloadPath, outputTemplate),
     ];
 
