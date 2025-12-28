@@ -610,32 +610,47 @@ app.get('/api/info', async (req, res) => {
                 // Try multiple APIs for video info
                 let videoInfo = null;
 
-                // 1. Try Invidious API (best for full info)
-                const invidiousInstances = [
-                    'https://inv.nadeko.net',
-                    'https://invidious.nerdvpn.de',
-                    'https://vid.puffyan.us'
-                ];
+                // 1. FIRST TRY: YouTube Data API (most reliable - uses API key)
+                try {
+                    console.log('Trying YouTube Data API first...');
+                    const ytApiKey = process.env.YOUTUBE_API_KEY || 'AIzaSyACDCP4xb5jrivWSy26eLU2Grj8A5u5rL0';
+                    const ytApiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics,contentDetails&id=${videoId}&key=${ytApiKey}`;
+                    const ytRes = await fetch(ytApiUrl);
+                    const ytData = await ytRes.json();
 
-                for (const inst of invidiousInstances) {
-                    try {
-                        console.log(`Trying Invidious for info: ${inst}`);
-                        const invRes = await fetch(`${inst}/api/v1/videos/${videoId}`, {
-                            headers: { 'User-Agent': 'Mozilla/5.0' }
-                        });
-                        if (invRes.ok) {
-                            videoInfo = await invRes.json();
-                            console.log('✅ Got info from Invidious');
-                            break;
-                        }
-                    } catch (e) { }
+                    if (ytData.items && ytData.items.length > 0) {
+                        const item = ytData.items[0];
+                        const duration = item.contentDetails?.duration || 'PT0S';
+
+                        // Parse ISO 8601 duration (PT1H2M3S)
+                        const durationMatch = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+                        const hours = parseInt(durationMatch?.[1] || 0);
+                        const minutes = parseInt(durationMatch?.[2] || 0);
+                        const seconds = parseInt(durationMatch?.[3] || 0);
+                        const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+
+                        videoInfo = {
+                            title: item.snippet.title,
+                            description: item.snippet.description,
+                            lengthSeconds: totalSeconds,
+                            viewCount: parseInt(item.statistics?.viewCount) || 0,
+                            likeCount: parseInt(item.statistics?.likeCount) || 0,
+                            author: item.snippet.channelTitle,
+                            videoThumbnails: [{ url: item.snippet.thumbnails?.maxres?.url || item.snippet.thumbnails?.high?.url || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` }]
+                        };
+                        console.log('✅ Got info from YouTube Data API');
+                    }
+                } catch (e) {
+                    console.log('YouTube Data API failed:', e.message);
                 }
 
-                // 2. Try Piped API
+                // 2. SECOND TRY: Piped API
                 if (!videoInfo) {
                     const pipedInstances = [
                         'https://pipedapi.kavin.rocks',
-                        'https://api.piped.privacydev.net'
+                        'https://api.piped.privacydev.net',
+                        'https://pipedapi.adminforge.de',
+                        'https://api.piped.yt'
                     ];
 
                     for (const inst of pipedInstances) {
@@ -646,55 +661,50 @@ app.get('/api/info', async (req, res) => {
                             });
                             if (pipedRes.ok) {
                                 const pipedData = await pipedRes.json();
-                                videoInfo = {
-                                    title: pipedData.title,
-                                    description: pipedData.description,
-                                    lengthSeconds: pipedData.duration,
-                                    viewCount: pipedData.views,
-                                    likeCount: pipedData.likes,
-                                    author: pipedData.uploader,
-                                    videoThumbnails: [{ url: pipedData.thumbnailUrl }],
-                                    adaptiveFormats: pipedData.videoStreams || [],
-                                    formatStreams: pipedData.audioStreams || []
-                                };
-                                console.log('✅ Got info from Piped');
-                                break;
+                                if (pipedData.title) {
+                                    videoInfo = {
+                                        title: pipedData.title,
+                                        description: pipedData.description || '',
+                                        lengthSeconds: pipedData.duration || 0,
+                                        viewCount: pipedData.views || 0,
+                                        likeCount: pipedData.likes || 0,
+                                        author: pipedData.uploader || pipedData.uploaderName || '',
+                                        videoThumbnails: [{ url: pipedData.thumbnailUrl || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` }],
+                                        adaptiveFormats: pipedData.videoStreams || [],
+                                        formatStreams: pipedData.audioStreams || []
+                                    };
+                                    console.log('✅ Got info from Piped');
+                                    break;
+                                }
                             }
                         } catch (e) { }
                     }
                 }
 
-                // 3. Last resort: YouTube Data API
+                // 3. THIRD TRY: Invidious API
                 if (!videoInfo) {
-                    try {
-                        const ytApiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics,contentDetails&id=${videoId}&key=AIzaSyBDVcCNGSGDtzBhDe_Z5Y8NLftQZtwLUvs`;
-                        const ytRes = await fetch(ytApiUrl);
-                        const ytData = await ytRes.json();
+                    const invidiousInstances = [
+                        'https://inv.nadeko.net',
+                        'https://invidious.nerdvpn.de',
+                        'https://vid.puffyan.us',
+                        'https://invidious.privacydev.net',
+                        'https://yt.artemislena.eu'
+                    ];
 
-                        if (ytData.items && ytData.items.length > 0) {
-                            const item = ytData.items[0];
-                            const duration = item.contentDetails.duration; // ISO 8601 format
-
-                            // Parse ISO 8601 duration (PT1H2M3S)
-                            const durationMatch = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
-                            const hours = parseInt(durationMatch?.[1] || 0);
-                            const minutes = parseInt(durationMatch?.[2] || 0);
-                            const seconds = parseInt(durationMatch?.[3] || 0);
-                            const totalSeconds = hours * 3600 + minutes * 60 + seconds;
-
-                            videoInfo = {
-                                title: item.snippet.title,
-                                description: item.snippet.description,
-                                lengthSeconds: totalSeconds,
-                                viewCount: parseInt(item.statistics.viewCount) || 0,
-                                likeCount: parseInt(item.statistics.likeCount) || 0,
-                                author: item.snippet.channelTitle,
-                                videoThumbnails: [{ url: item.snippet.thumbnails.maxres?.url || item.snippet.thumbnails.high?.url }]
-                            };
-                            console.log('✅ Got info from YouTube Data API');
-                        }
-                    } catch (e) {
-                        console.log('YouTube Data API failed:', e.message);
+                    for (const inst of invidiousInstances) {
+                        try {
+                            console.log(`Trying Invidious for info: ${inst}`);
+                            const invRes = await fetch(`${inst}/api/v1/videos/${videoId}`, {
+                                headers: { 'User-Agent': 'Mozilla/5.0' }
+                            });
+                            if (invRes.ok) {
+                                videoInfo = await invRes.json();
+                                if (videoInfo.title) {
+                                    console.log('✅ Got info from Invidious');
+                                    break;
+                                }
+                            }
+                        } catch (e) { }
                     }
                 }
 
