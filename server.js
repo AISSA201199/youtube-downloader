@@ -7,11 +7,11 @@ const fs = require('fs');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ===== TikTok Support via Cobalt API & TikWM =====
-async function downloadTikTokViaCobalt(url) {
-    // 1. Try Cobalt API
+// ===== Cobalt API Support (YouTube, TikTok, Instagram, etc.) =====
+async function downloadViaCobalt(url, quality = '1080') {
+    // Try Cobalt API - supports many platforms including YouTube
     try {
-        console.log('Attempting Cobalt API...');
+        console.log('🔷 Attempting Cobalt API for:', url);
         const response = await fetch('https://api.cobalt.tools/api/json', {
             method: 'POST',
             headers: {
@@ -22,21 +22,51 @@ async function downloadTikTokViaCobalt(url) {
             body: JSON.stringify({
                 url: url,
                 vCodec: 'h264',
-                vQuality: '1080',
-                isNoTTWatermark: true
+                vQuality: quality,
+                aFormat: 'mp3',
+                isNoTTWatermark: true,
+                isAudioOnly: false
             })
         });
 
         const data = await response.json();
+        console.log('Cobalt response:', JSON.stringify(data).substring(0, 200));
+
         if (data && (data.url || data.stream)) {
-            console.log('Cobalt success');
-            return { ...data, url: data.url || data.stream };
+            console.log('✅ Cobalt success');
+            return {
+                success: true,
+                url: data.url || data.stream,
+                audio: data.audio,
+                filename: data.filename || 'video.mp4'
+            };
         }
+
+        // Handle picker (multiple streams)
+        if (data && data.picker && data.picker.length > 0) {
+            console.log('✅ Cobalt picker success');
+            return {
+                success: true,
+                url: data.picker[0].url,
+                filename: 'video.mp4'
+            };
+        }
+
+        return { success: false, error: data.text || 'Cobalt failed' };
     } catch (error) {
         console.error('Cobalt API error:', error.message);
+        return { success: false, error: error.message };
+    }
+}
+
+// Legacy TikTok function (uses downloadViaCobalt internally)
+async function downloadTikTokViaCobalt(url) {
+    const result = await downloadViaCobalt(url, '1080');
+    if (result.success) {
+        return { status: 'stream', url: result.url, audio: result.audio, filename: result.filename };
     }
 
-    // 2. Fallback: TikWM API
+    // Fallback: TikWM API for TikTok only
     try {
         console.log('Attempting TikWM API...');
         const response = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(url)}`, {
@@ -50,7 +80,7 @@ async function downloadTikTokViaCobalt(url) {
             console.log('TikWM success');
             return {
                 status: 'stream',
-                url: data.data.play, // No watermark URL
+                url: data.data.play,
                 audio: data.data.music,
                 filename: `tiktok_${data.data.id}.mp4`
             };
@@ -59,7 +89,12 @@ async function downloadTikTokViaCobalt(url) {
         console.error('TikWM API error:', error.message);
     }
 
-    return { status: 'error', text: 'All TikTok APIs failed' };
+    return { status: 'error', text: 'All APIs failed' };
+}
+
+// Check if URL is YouTube
+function isYouTubeUrl(url) {
+    return url.includes('youtube.com') || url.includes('youtu.be');
 }
 
 // Check if URL is TikTok
@@ -235,6 +270,43 @@ app.get('/api/info', async (req, res) => {
     } catch (err) {
         console.log('Error:', err);
         res.status(500).json({ error: 'خطأ في الاتصال: ' + err.message });
+    }
+});
+
+// API: Download via Cobalt (YouTube, TikTok, etc.) - Bypasses cloud restrictions
+app.post('/api/download/cobalt', async (req, res) => {
+    const { url, quality = '1080' } = req.body;
+
+    if (!url) {
+        return res.status(400).json({ error: 'الرجاء إدخال رابط الفيديو' });
+    }
+
+    console.log('🔷 Cobalt download request for:', url);
+
+    try {
+        const result = await downloadViaCobalt(url, quality);
+
+        if (result.success && result.url) {
+            res.json({
+                success: true,
+                downloadUrl: result.url,
+                filename: result.filename || 'video.mp4',
+                message: 'رابط التحميل جاهز!'
+            });
+        } else {
+            res.status(500).json({
+                success: false,
+                error: result.error || 'فشل في الحصول على رابط التحميل',
+                fallback: true // Tell frontend to try yt-dlp
+            });
+        }
+    } catch (error) {
+        console.error('Cobalt endpoint error:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message,
+            fallback: true
+        });
     }
 });
 
