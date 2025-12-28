@@ -96,6 +96,9 @@ app.get('/api/info', async (req, res) => {
 
     console.log('Fetching info for:', url);
 
+    // Check if it's a YouTube URL
+    const isYouTube = url.includes('youtube.com') || url.includes('youtu.be');
+
     try {
         // Use more compatible options for all sites
         const args = [
@@ -104,6 +107,7 @@ app.get('/api/info', async (req, res) => {
             '--no-warnings',
             '--ignore-errors',
             '--geo-bypass',
+            '--socket-timeout', '30',
             '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             '--referer', 'https://www.google.com/',
             // Important for TikTok, Instagram, etc.
@@ -133,8 +137,51 @@ app.get('/api/info', async (req, res) => {
             console.log('yt-dlp stderr:', chunk.toString());
         });
 
-        ytdlp.on('close', (code) => {
+        ytdlp.on('close', async (code) => {
             console.log('yt-dlp exit code:', code);
+
+            // If yt-dlp failed and it's YouTube, try fallback
+            if ((code !== 0 || !data) && isYouTube) {
+                console.log('yt-dlp failed for YouTube, trying fallback...');
+
+                try {
+                    // Fallback: Use noembed.com for basic info
+                    const noembedRes = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(url)}`);
+                    const noembedData = await noembedRes.json();
+
+                    if (noembedData && noembedData.title) {
+                        console.log('✅ Fallback successful via noembed');
+                        return res.json({
+                            title: noembedData.title || 'فيديو YouTube',
+                            thumbnail: noembedData.thumbnail_url || '',
+                            duration: 0,
+                            duration_string: '--:--',
+                            channel: noembedData.author_name || 'غير معروف',
+                            view_count: 0,
+                            like_count: 0,
+                            upload_date: '',
+                            description: '',
+                            qualities: [
+                                { id: 'best', label: 'أفضل جودة متاحة' },
+                                { id: 'bestvideo[height<=1080]+bestaudio/best', label: '1080p' },
+                                { id: 'bestvideo[height<=720]+bestaudio/best', label: '720p' },
+                                { id: 'bestvideo[height<=480]+bestaudio/best', label: '480p' },
+                                { id: 'bestaudio', label: '🎵 صوت فقط (MP3)' }
+                            ],
+                            is_live: false,
+                            extractor: 'youtube',
+                            fallback_used: true
+                        });
+                    }
+                } catch (fallbackErr) {
+                    console.log('Fallback also failed:', fallbackErr.message);
+                }
+
+                return res.status(500).json({
+                    error: 'فشل في جلب معلومات الفيديو. تأكد من صحة الرابط وأن yt-dlp محدث.',
+                    details: errorData.substring(0, 200)
+                });
+            }
 
             if (code !== 0 && !data) {
                 console.log('Error:', errorData);
