@@ -97,6 +97,431 @@ function isYouTubeUrl(url) {
     return url.includes('youtube.com') || url.includes('youtu.be');
 }
 
+// Extract YouTube Video ID
+function extractYouTubeId(url) {
+    const patterns = [
+        /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\?\/]+)/,
+        /youtube\.com\/shorts\/([^&\?\/]+)/
+    ];
+    for (const pattern of patterns) {
+        const match = url.match(pattern);
+        if (match) return match[1];
+    }
+    return null;
+}
+
+// ===== MEGA YouTube Download System - 10+ APIs in Parallel =====
+
+// Extract YouTube Video ID
+function extractYouTubeId(url) {
+    const patterns = [
+        /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\?\/]+)/,
+        /youtube\.com\/shorts\/([^&\?\/]+)/
+    ];
+    for (const pattern of patterns) {
+        const match = url.match(pattern);
+        if (match) return match[1];
+    }
+    return null;
+}
+
+// API 1: Cobalt (Multiple instances)
+async function tryCobalt(url, quality) {
+    const endpoints = [
+        'https://api.cobalt.tools/api/json',
+        'https://co.wuk.sh/api/json'
+    ];
+
+    for (const endpoint of endpoints) {
+        try {
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                },
+                body: JSON.stringify({ url, vCodec: 'h264', vQuality: quality, aFormat: 'mp3' })
+            });
+            const data = await response.json();
+            if (data?.url || data?.stream) {
+                return { success: true, url: data.url || data.stream, source: 'Cobalt' };
+            }
+            if (data?.picker?.[0]?.url) {
+                return { success: true, url: data.picker[0].url, source: 'Cobalt' };
+            }
+        } catch (e) { }
+    }
+    return { success: false };
+}
+
+// API 2: Invidious (10 instances)
+async function tryInvidious(videoId, quality) {
+    const instances = [
+        'https://inv.nadeko.net',
+        'https://invidious.nerdvpn.de',
+        'https://vid.puffyan.us',
+        'https://invidious.slipfox.xyz',
+        'https://invidious.privacydev.net',
+        'https://invidious.io.lol',
+        'https://yt.artemislena.eu',
+        'https://invidious.protokolla.fi',
+        'https://inv.tux.pizza',
+        'https://invidious.einfachzocken.eu'
+    ];
+
+    for (const inst of instances) {
+        try {
+            const res = await fetch(`${inst}/api/v1/videos/${videoId}`, {
+                headers: { 'User-Agent': 'Mozilla/5.0' }
+            });
+            if (!res.ok) continue;
+            const data = await res.json();
+            const formats = [...(data.adaptiveFormats || []), ...(data.formatStreams || [])];
+            let best = formats.find(f => f.type?.includes('video/mp4') && f.qualityLabel?.includes(quality));
+            if (!best) best = formats.find(f => f.type?.includes('video/mp4'));
+            if (!best) best = formats.find(f => f.url);
+            if (best?.url) {
+                return { success: true, url: best.url, title: data.title, source: 'Invidious' };
+            }
+        } catch (e) { }
+    }
+    return { success: false };
+}
+
+// API 3: Piped (Multiple instances)
+async function tryPiped(videoId) {
+    const instances = [
+        'https://pipedapi.kavin.rocks',
+        'https://api.piped.privacydev.net',
+        'https://pipedapi.in.projectsegfau.lt',
+        'https://pipedapi.tokhmi.xyz',
+        'https://api.piped.yt',
+        'https://pipedapi.adminforge.de'
+    ];
+
+    for (const inst of instances) {
+        try {
+            const res = await fetch(`${inst}/streams/${videoId}`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+            if (!res.ok) continue;
+            const data = await res.json();
+            const streams = data.videoStreams || [];
+            let best = streams.find(s => s.quality === '720p' && s.mimeType?.includes('video/mp4'));
+            if (!best) best = streams.find(s => s.mimeType?.includes('video/mp4'));
+            if (!best) best = streams[0];
+            if (best?.url) {
+                return { success: true, url: best.url, title: data.title, source: 'Piped' };
+            }
+        } catch (e) { }
+    }
+    return { success: false };
+}
+
+// API 4: AllTube (Y2Mate alternative)
+async function tryAllTube(videoId) {
+    try {
+        const res = await fetch(`https://alltubedownload.net/json?url=https://www.youtube.com/watch?v=${videoId}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+        });
+        const data = await res.json();
+        if (data?.url) {
+            return { success: true, url: data.url, source: 'AllTube' };
+        }
+    } catch (e) { }
+    return { success: false };
+}
+
+// API 5: YouTube4KDownloader style
+async function tryY4K(videoId) {
+    try {
+        const res = await fetch(`https://yt1s.io/api/json/convert?url=https://youtube.com/watch?v=${videoId}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+        });
+        const data = await res.json();
+        if (data?.url) {
+            return { success: true, url: data.url, source: 'Y4K' };
+        }
+    } catch (e) { }
+    return { success: false };
+}
+
+// API 6: SaveFrom style
+async function trySaveFrom(videoId) {
+    try {
+        const res = await fetch(`https://worker.sf-tools.com/savefrom.php?url=https://www.youtube.com/watch?v=${videoId}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+        });
+        const data = await res.json();
+        if (data?.url?.[0]?.url) {
+            return { success: true, url: data.url[0].url, source: 'SaveFrom' };
+        }
+    } catch (e) { }
+    return { success: false };
+}
+
+// API 7: GetYouTubeVideo proxy
+async function tryProxy(videoId) {
+    const proxies = [
+        `https://yt-download.org/api/button/mp4/${videoId}`,
+        `https://loader.to/api/button/?url=https://www.youtube.com/watch?v=${videoId}&f=360`
+    ];
+
+    for (const proxy of proxies) {
+        try {
+            const res = await fetch(proxy, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+            const text = await res.text();
+            const match = text.match(/href="(https?:\/\/[^"]+\.mp4[^"]*)"/);
+            if (match?.[1]) {
+                return { success: true, url: match[1], source: 'Proxy' };
+            }
+        } catch (e) { }
+    }
+    return { success: false };
+}
+
+// ========== 🔥 SNEAKY METHODS - Tricks & Workarounds ==========
+
+// TRICK 1: YouTube Embed Page Scraping (الحصول على رابط من صفحة الـ embed)
+async function tryEmbedScrape(videoId) {
+    try {
+        console.log('🕵️ Trying embed scrape...');
+        const res = await fetch(`https://www.youtube.com/embed/${videoId}`, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15',
+                'Accept': 'text/html'
+            }
+        });
+        const html = await res.text();
+
+        // Look for stream URLs in the page
+        const patterns = [
+            /"url":"(https:\/\/[^"]+googlevideo\.com[^"]+)"/g,
+            /itag.*?url.*?(https%3A%2F%2F[^"&]+)/g
+        ];
+
+        for (const pattern of patterns) {
+            const matches = html.matchAll(pattern);
+            for (const match of matches) {
+                let url = match[1];
+                if (url.includes('%3A')) url = decodeURIComponent(url);
+                if (url.includes('googlevideo.com')) {
+                    return { success: true, url, source: 'EmbedScrape' };
+                }
+            }
+        }
+    } catch (e) { }
+    return { success: false };
+}
+
+// TRICK 2: Mobile API Spoofing (التظاهر بأننا تطبيق موبايل)
+async function tryMobileAPI(videoId) {
+    try {
+        console.log('📱 Trying mobile API spoof...');
+        const res = await fetch('https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'User-Agent': 'com.google.android.youtube/17.31.35 (Linux; U; Android 11) gzip',
+                'X-Goog-Api-Key': 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8'
+            },
+            body: JSON.stringify({
+                videoId: videoId,
+                context: {
+                    client: {
+                        clientName: 'ANDROID',
+                        clientVersion: '17.31.35',
+                        androidSdkVersion: 30,
+                        userAgent: 'com.google.android.youtube/17.31.35 (Linux; U; Android 11) gzip',
+                        hl: 'en',
+                        gl: 'US'
+                    }
+                },
+                contentCheckOk: true,
+                racyCheckOk: true
+            })
+        });
+
+        const data = await res.json();
+        const formats = [...(data.streamingData?.formats || []), ...(data.streamingData?.adaptiveFormats || [])];
+        const video = formats.find(f => f.mimeType?.includes('video/mp4') && f.url);
+
+        if (video?.url) {
+            return { success: true, url: video.url, source: 'MobileAPI' };
+        }
+    } catch (e) { }
+    return { success: false };
+}
+
+// TRICK 3: iOS Client API (عميل آيفون)
+async function tryIOSClient(videoId) {
+    try {
+        console.log('🍎 Trying iOS client...');
+        const res = await fetch('https://www.youtube.com/youtubei/v1/player?key=AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'User-Agent': 'com.google.ios.youtube/17.33.2 (iPhone14,3; U; CPU iOS 15_6 like Mac OS X)'
+            },
+            body: JSON.stringify({
+                videoId: videoId,
+                context: {
+                    client: {
+                        clientName: 'IOS',
+                        clientVersion: '17.33.2',
+                        deviceModel: 'iPhone14,3',
+                        userAgent: 'com.google.ios.youtube/17.33.2 (iPhone14,3; U; CPU iOS 15_6 like Mac OS X)',
+                        hl: 'en'
+                    }
+                }
+            })
+        });
+
+        const data = await res.json();
+        const formats = data.streamingData?.formats || [];
+        const video = formats.find(f => f.url);
+
+        if (video?.url) {
+            return { success: true, url: video.url, source: 'iOSClient' };
+        }
+    } catch (e) { }
+    return { success: false };
+}
+
+// TRICK 4: TV Client (عميل التلفزيون - أقل قيوداً)
+async function tryTVClient(videoId) {
+    try {
+        console.log('📺 Trying TV client...');
+        const res = await fetch('https://www.youtube.com/youtubei/v1/player?key=AIzaSyDCU8hByM-4DrUqRUYnGn-3llEO78bcxq8', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'User-Agent': 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version'
+            },
+            body: JSON.stringify({
+                videoId: videoId,
+                context: {
+                    client: {
+                        clientName: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
+                        clientVersion: '2.0'
+                    },
+                    thirdParty: {
+                        embedUrl: 'https://www.google.com'
+                    }
+                }
+            })
+        });
+
+        const data = await res.json();
+        const formats = [...(data.streamingData?.formats || []), ...(data.streamingData?.adaptiveFormats || [])];
+        const video = formats.find(f => f.url && f.mimeType?.includes('video'));
+
+        if (video?.url) {
+            return { success: true, url: video.url, source: 'TVClient' };
+        }
+    } catch (e) { }
+    return { success: false };
+}
+
+// TRICK 5: Cloudtube (خدمة بديلة)
+async function tryCloudtube(videoId) {
+    const instances = [
+        'https://tube.cadence.moe',
+        'https://yt.cdaut.de'
+    ];
+
+    for (const inst of instances) {
+        try {
+            const res = await fetch(`${inst}/api/v1/videos/${videoId}`, {
+                headers: { 'User-Agent': 'Mozilla/5.0' }
+            });
+            const data = await res.json();
+            const formats = data.formatStreams || [];
+            const video = formats.find(f => f.url);
+            if (video?.url) {
+                return { success: true, url: video.url, source: 'Cloudtube' };
+            }
+        } catch (e) { }
+    }
+    return { success: false };
+}
+
+// TRICK 6: البحث عن نسخ مخبأة/مؤرشفة
+async function tryArchive(videoId) {
+    try {
+        console.log('📦 Trying archive lookup...');
+        const res = await fetch(`https://web.archive.org/web/2/https://www.youtube.com/watch?v=${videoId}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+            redirect: 'follow'
+        });
+        // If archived, might have cached video URLs
+        const html = await res.text();
+        const match = html.match(/(https:\/\/[^"]+googlevideo\.com[^"]+)/);
+        if (match?.[1]) {
+            return { success: true, url: match[1], source: 'Archive' };
+        }
+    } catch (e) { }
+    return { success: false };
+}
+
+// 🚀 MASTER FUNCTION - Runs ALL APIs in PARALLEL for SPEED
+async function downloadYouTubeVideo(url, quality = '720') {
+    const videoId = extractYouTubeId(url);
+    if (!videoId) {
+        return { success: false, error: 'رابط يوتيوب غير صالح' };
+    }
+
+    console.log(`🚀 MEGA TURBO DOWNLOAD: ${videoId} - 30+ servers in parallel...`);
+
+    // WAVE 1: Run ALL APIs at the same time - first one to succeed wins!
+    const results = await Promise.allSettled([
+        // Standard APIs
+        tryCobalt(url, quality),
+        tryInvidious(videoId, quality),
+        tryPiped(videoId),
+        tryAllTube(videoId),
+        tryY4K(videoId),
+        trySaveFrom(videoId),
+        tryProxy(videoId),
+        // Sneaky methods
+        tryMobileAPI(videoId),
+        tryIOSClient(videoId),
+        tryTVClient(videoId),
+        tryCloudtube(videoId),
+        tryEmbedScrape(videoId)
+    ]);
+
+    // Find first successful result
+    for (const result of results) {
+        if (result.status === 'fulfilled' && result.value.success) {
+            console.log(`✅ SUCCESS via ${result.value.source}!`);
+            return result.value;
+        }
+    }
+
+    // WAVE 2: If parallel failed, try more sneaky methods
+    console.log('⚠️ Wave 1 failed, trying Wave 2 sneaky methods...');
+
+    let backup = await tryInvidious(videoId, '360');
+    if (backup.success) return backup;
+
+    backup = await tryPiped(videoId);
+    if (backup.success) return backup;
+
+    backup = await tryArchive(videoId);
+    if (backup.success) return backup;
+
+    // WAVE 3: Last resort - different quality
+    console.log('🔥 Wave 2 failed, trying Wave 3 low quality...');
+
+    backup = await tryCobalt(url, '480');
+    if (backup.success) return backup;
+
+    backup = await tryCobalt(url, '360');
+    if (backup.success) return backup;
+
+    return { success: false, error: 'فشلت جميع الطرق (30+ خادم) - الفيديو محمي أو غير متاح' };
+}
+
 // Check if URL is TikTok
 function isTikTokUrl(url) {
     return url.includes('tiktok.com') || url.includes('vm.tiktok.com');
@@ -175,45 +600,163 @@ app.get('/api/info', async (req, res) => {
         ytdlp.on('close', async (code) => {
             console.log('yt-dlp exit code:', code);
 
-            // If yt-dlp failed and it's YouTube, try fallback
+            // If yt-dlp failed and it's YouTube, try comprehensive fallback
             if ((code !== 0 || !data) && isYouTube) {
-                console.log('yt-dlp failed for YouTube, trying fallback...');
+                console.log('yt-dlp failed for YouTube, trying multi-API fallback...');
 
-                try {
-                    // Fallback: Use noembed.com for basic info
-                    const noembedRes = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(url)}`);
-                    const noembedData = await noembedRes.json();
+                const videoId = extractYouTubeId(url);
+                if (!videoId) {
+                    return res.status(400).json({ error: 'رابط YouTube غير صالح' });
+                }
 
-                    if (noembedData && noembedData.title) {
-                        console.log('✅ Fallback successful via noembed');
-                        return res.json({
-                            title: noembedData.title || 'فيديو YouTube',
-                            thumbnail: noembedData.thumbnail_url || '',
-                            duration: 0,
-                            duration_string: '--:--',
-                            channel: noembedData.author_name || 'غير معروف',
-                            view_count: 0,
-                            like_count: 0,
-                            upload_date: '',
-                            description: '',
-                            qualities: [
-                                { id: 'best', label: 'أفضل جودة متاحة' },
-                                { id: 'bestvideo[height<=1080]+bestaudio/best', label: '1080p' },
-                                { id: 'bestvideo[height<=720]+bestaudio/best', label: '720p' },
-                                { id: 'bestvideo[height<=480]+bestaudio/best', label: '480p' },
-                                { id: 'bestaudio', label: '🎵 صوت فقط (MP3)' }
-                            ],
-                            is_live: false,
-                            extractor: 'youtube',
-                            fallback_used: true
+                // Try multiple APIs for video info
+                let videoInfo = null;
+
+                // 1. Try Invidious API (best for full info)
+                const invidiousInstances = [
+                    'https://inv.nadeko.net',
+                    'https://invidious.nerdvpn.de',
+                    'https://vid.puffyan.us'
+                ];
+
+                for (const inst of invidiousInstances) {
+                    try {
+                        console.log(`Trying Invidious for info: ${inst}`);
+                        const invRes = await fetch(`${inst}/api/v1/videos/${videoId}`, {
+                            headers: { 'User-Agent': 'Mozilla/5.0' }
                         });
+                        if (invRes.ok) {
+                            videoInfo = await invRes.json();
+                            console.log('✅ Got info from Invidious');
+                            break;
+                        }
+                    } catch (e) { }
+                }
+
+                // 2. Try Piped API
+                if (!videoInfo) {
+                    const pipedInstances = [
+                        'https://pipedapi.kavin.rocks',
+                        'https://api.piped.privacydev.net'
+                    ];
+
+                    for (const inst of pipedInstances) {
+                        try {
+                            console.log(`Trying Piped for info: ${inst}`);
+                            const pipedRes = await fetch(`${inst}/streams/${videoId}`, {
+                                headers: { 'User-Agent': 'Mozilla/5.0' }
+                            });
+                            if (pipedRes.ok) {
+                                const pipedData = await pipedRes.json();
+                                videoInfo = {
+                                    title: pipedData.title,
+                                    description: pipedData.description,
+                                    lengthSeconds: pipedData.duration,
+                                    viewCount: pipedData.views,
+                                    likeCount: pipedData.likes,
+                                    author: pipedData.uploader,
+                                    videoThumbnails: [{ url: pipedData.thumbnailUrl }],
+                                    adaptiveFormats: pipedData.videoStreams || [],
+                                    formatStreams: pipedData.audioStreams || []
+                                };
+                                console.log('✅ Got info from Piped');
+                                break;
+                            }
+                        } catch (e) { }
                     }
-                } catch (fallbackErr) {
-                    console.log('Fallback also failed:', fallbackErr.message);
+                }
+
+                // 3. Last resort: YouTube Data API
+                if (!videoInfo) {
+                    try {
+                        const ytApiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics,contentDetails&id=${videoId}&key=AIzaSyBDVcCNGSGDtzBhDe_Z5Y8NLftQZtwLUvs`;
+                        const ytRes = await fetch(ytApiUrl);
+                        const ytData = await ytRes.json();
+
+                        if (ytData.items && ytData.items.length > 0) {
+                            const item = ytData.items[0];
+                            const duration = item.contentDetails.duration; // ISO 8601 format
+
+                            // Parse ISO 8601 duration (PT1H2M3S)
+                            const durationMatch = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+                            const hours = parseInt(durationMatch?.[1] || 0);
+                            const minutes = parseInt(durationMatch?.[2] || 0);
+                            const seconds = parseInt(durationMatch?.[3] || 0);
+                            const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+
+                            videoInfo = {
+                                title: item.snippet.title,
+                                description: item.snippet.description,
+                                lengthSeconds: totalSeconds,
+                                viewCount: parseInt(item.statistics.viewCount) || 0,
+                                likeCount: parseInt(item.statistics.likeCount) || 0,
+                                author: item.snippet.channelTitle,
+                                videoThumbnails: [{ url: item.snippet.thumbnails.maxres?.url || item.snippet.thumbnails.high?.url }]
+                            };
+                            console.log('✅ Got info from YouTube Data API');
+                        }
+                    } catch (e) {
+                        console.log('YouTube Data API failed:', e.message);
+                    }
+                }
+
+                if (videoInfo) {
+                    // Build qualities from available formats
+                    const qualities = [{ id: 'best', label: 'أفضل جودة متاحة' }];
+
+                    // Try to get real qualities from Invidious/Piped
+                    const formats = [...(videoInfo.adaptiveFormats || []), ...(videoInfo.formatStreams || [])];
+                    const heights = new Set();
+
+                    formats.forEach(f => {
+                        if (f.qualityLabel) {
+                            const h = parseInt(f.qualityLabel);
+                            if (h) heights.add(h);
+                        }
+                        if (f.quality) {
+                            const h = parseInt(f.quality);
+                            if (h) heights.add(h);
+                        }
+                    });
+
+                    // Add detected qualities
+                    [...heights].sort((a, b) => b - a).forEach(h => {
+                        const label = h >= 2160 ? '4K' : h >= 1440 ? '2K' : `${h}p`;
+                        qualities.push({ id: `${h}`, label });
+                    });
+
+                    // Default qualities if none detected
+                    if (qualities.length === 1) {
+                        qualities.push({ id: '1080', label: '1080p' });
+                        qualities.push({ id: '720', label: '720p' });
+                        qualities.push({ id: '480', label: '480p' });
+                        qualities.push({ id: '360', label: '360p' });
+                    }
+
+                    qualities.push({ id: 'bestaudio', label: '🎵 صوت فقط (MP3)' });
+
+                    const duration = videoInfo.lengthSeconds || 0;
+
+                    return res.json({
+                        title: videoInfo.title || 'فيديو YouTube',
+                        thumbnail: videoInfo.videoThumbnails?.[0]?.url || `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`,
+                        duration: duration,
+                        duration_string: formatDuration(duration),
+                        channel: videoInfo.author || videoInfo.authorId || 'غير معروف',
+                        view_count: videoInfo.viewCount || 0,
+                        like_count: videoInfo.likeCount || 0,
+                        upload_date: videoInfo.published || '',
+                        description: (videoInfo.description || '').substring(0, 500),
+                        qualities: qualities,
+                        is_live: videoInfo.liveNow || false,
+                        extractor: 'youtube',
+                        fallback_used: true,
+                        fallback_source: 'multi-api'
+                    });
                 }
 
                 return res.status(500).json({
-                    error: 'فشل في جلب معلومات الفيديو. تأكد من صحة الرابط وأن yt-dlp محدث.',
+                    error: 'فشل في جلب معلومات الفيديو من جميع المصادر',
                     details: errorData.substring(0, 200)
                 });
             }
@@ -275,16 +818,24 @@ app.get('/api/info', async (req, res) => {
 
 // API: Download via Cobalt (YouTube, TikTok, etc.) - Bypasses cloud restrictions
 app.post('/api/download/cobalt', async (req, res) => {
-    const { url, quality = '1080' } = req.body;
+    const { url, quality = '720' } = req.body;
 
     if (!url) {
         return res.status(400).json({ error: 'الرجاء إدخال رابط الفيديو' });
     }
 
-    console.log('🔷 Cobalt download request for:', url);
+    console.log('🔷 Multi-API download request for:', url);
 
     try {
-        const result = await downloadViaCobalt(url, quality);
+        let result;
+
+        // Use master YouTube function for YouTube URLs
+        if (isYouTubeUrl(url)) {
+            result = await downloadYouTubeVideo(url, quality);
+        } else {
+            // For other platforms, use Cobalt directly
+            result = await downloadViaCobalt(url, quality);
+        }
 
         if (result.success && result.url) {
             res.json({
