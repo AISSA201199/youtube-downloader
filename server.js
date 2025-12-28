@@ -112,19 +112,6 @@ function extractYouTubeId(url) {
 
 // ===== MEGA YouTube Download System - 10+ APIs in Parallel =====
 
-// Extract YouTube Video ID
-function extractYouTubeId(url) {
-    const patterns = [
-        /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\?\/]+)/,
-        /youtube\.com\/shorts\/([^&\?\/]+)/
-    ];
-    for (const pattern of patterns) {
-        const match = url.match(pattern);
-        if (match) return match[1];
-    }
-    return null;
-}
-
 // API 1: Cobalt (Multiple instances)
 async function tryCobalt(url, quality) {
     const endpoints = [
