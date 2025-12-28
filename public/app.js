@@ -671,6 +671,17 @@ function downloadCompleted() {
     addToHistory(state.currentVideo);
     updateStats();
 
+    // Trigger file download to user's browser
+    if (state.currentDownloadId) {
+        const downloadUrl = `${API_BASE}/download-file/${state.currentDownloadId}`;
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = '';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    }
+
     setTimeout(() => {
         hide('progressSection');
         show('successSection');
