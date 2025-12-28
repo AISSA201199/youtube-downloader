@@ -91,17 +91,28 @@ app.get('/api/info', async (req, res) => {
     console.log('Fetching info for:', url);
 
     try {
-        // Use more compatible options for all sites
+        // Cloud-compatible options for yt-dlp
         const args = [
             '--dump-json',
             '--no-playlist',
             '--no-warnings',
             '--ignore-errors',
+            // CLOUD WORKAROUNDS - Critical for Render/Heroku/etc
+            '--geo-bypass',
+            '--geo-bypass-country', 'US',
+            '--extractor-retries', '3',
+            '--retry-sleep', '3',
+            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            '--referer', 'https://www.youtube.com/',
+            '--add-header', 'Accept-Language:en-US,en;q=0.9',
+            // Force IPv4 (some cloud providers have IPv6 issues)
+            '--force-ipv4',
             // Important for TikTok, Instagram, etc.
             '--extractor-args', 'tiktok:api_hostname=api22-normal-c-useast1a.tiktokv.com',
             url
         ];
 
+        console.log('Running yt-dlp with cloud workarounds...');
         const ytdlp = spawn('yt-dlp', args, { shell: false });
 
         let data = '';
@@ -121,9 +132,24 @@ app.get('/api/info', async (req, res) => {
 
             if (code !== 0 && !data) {
                 console.log('Error:', errorData);
+
+                // Better error messages for common issues
+                let errorMessage = 'فشل في جلب معلومات الفيديو.';
+                if (errorData.includes('Video unavailable')) {
+                    errorMessage = 'الفيديو غير متاح أو خاص.';
+                } else if (errorData.includes('age-restricted')) {
+                    errorMessage = 'الفيديو مقيد بالعمر. جرب استخدام cookies.';
+                } else if (errorData.includes('blocked')) {
+                    errorMessage = 'الفيديو محظور في بلدك.';
+                } else if (errorData.includes('private')) {
+                    errorMessage = 'الفيديو خاص ولا يمكن الوصول إليه.';
+                } else if (errorData.includes('Sign in')) {
+                    errorMessage = 'يتطلب تسجيل الدخول. جرب فيديو آخر.';
+                }
+
                 return res.status(500).json({
-                    error: 'فشل في جلب معلومات الفيديو. تأكد من صحة الرابط وأن yt-dlp محدث.',
-                    details: errorData.substring(0, 200)
+                    error: errorMessage,
+                    details: errorData.substring(0, 300)
                 });
             }
 
@@ -224,6 +250,12 @@ app.post('/api/download', async (req, res) => {
         '--progress',
         '--no-warnings',
         '--windows-filenames', // Safe filenames for Windows (better than restrict-filenames)
+        // CLOUD WORKAROUNDS
+        '--geo-bypass',
+        '--geo-bypass-country', 'US',
+        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        '--referer', 'https://www.youtube.com/',
+        '--force-ipv4',
         '-o', path.join(downloadPath, outputTemplate),
     ];
 
