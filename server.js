@@ -16,7 +16,8 @@ async function downloadTikTokViaCobalt(url) {
             method: 'POST',
             headers: {
                 'Accept': 'application/json',
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             },
             body: JSON.stringify({
                 url: url,
@@ -38,7 +39,11 @@ async function downloadTikTokViaCobalt(url) {
     // 2. Fallback: TikWM API
     try {
         console.log('Attempting TikWM API...');
-        const response = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(url)}`);
+        const response = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(url)}`, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+        });
         const data = await response.json();
 
         if (data && data.data) {
@@ -76,6 +81,7 @@ function runYtDlp(args, options = {}) {
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
+app.use('/downloads', express.static(path.join(__dirname, 'downloads')));
 
 // Store download progress
 const downloadProgress = new Map();
@@ -99,8 +105,16 @@ app.get('/api/info', async (req, res) => {
             '--ignore-errors',
             // Important for TikTok, Instagram, etc.
             '--extractor-args', 'tiktok:api_hostname=api22-normal-c-useast1a.tiktokv.com',
-            url
         ];
+
+        // Add cookies if available
+        const cookiesPath = path.join(__dirname, 'cookies.txt');
+        if (fs.existsSync(cookiesPath)) {
+            console.log('✅ Using cookies.txt');
+            args.push('--cookies', cookiesPath);
+        }
+
+        args.push(url);
 
         const ytdlp = spawn('yt-dlp', args, { shell: false });
 
@@ -226,6 +240,12 @@ app.post('/api/download', async (req, res) => {
         '--windows-filenames', // Safe filenames for Windows (better than restrict-filenames)
         '-o', path.join(downloadPath, outputTemplate),
     ];
+
+    // Add cookies if available
+    const cookiesPath = path.join(__dirname, 'cookies.txt');
+    if (fs.existsSync(cookiesPath)) {
+        args.push('--cookies', cookiesPath);
+    }
 
     // Quality/Format
     if (audioOnly) {
@@ -435,7 +455,16 @@ app.post('/api/download', async (req, res) => {
             }
 
             // SUCCESS HANDLER
-            downloadProgress.set(downloadId, { progress: 100, status: 'completed', speed: '', eta: '' });
+            // SUCCESS HANDLER
+            const finalFileName = finalFilePath ? path.basename(finalFilePath) : 'video.mp4';
+            downloadProgress.set(downloadId, {
+                progress: 100,
+                status: 'completed',
+                speed: '',
+                eta: '',
+                downloadUrl: `/downloads/${finalFileName}`,
+                filename: finalFileName
+            });
 
             // AUTO UPLOAD LOGIC
             // Check if user requested auto-upload and we captured the filepath
@@ -512,30 +541,40 @@ app.get('/api/check', (req, res) => {
 });
 
 // API: Search YouTube
-app.get('/api/search', async (req, res) => {
-    const { q, sort = 'relevance' } = req.query;
 
-    if (!q) {
-        return res.status(400).json({ error: 'الرجاء إدخال كلمة البحث' });
+
+// API: Hybrid Search (YouTube)
+app.get('/api/search/hybrid', async (req, res) => {
+    const { query } = req.query;
+
+    if (!query) {
+        return res.status(400).json({ error: 'كلمة البحث مطلوبة' });
     }
 
     try {
-        const ytdlp = spawn('yt-dlp', [
+        const args = [
             '--flat-playlist',
             '--dump-json',
             '--no-warnings',
-            `ytsearch10:${q}`
-        ], { shell: true });
+            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        ];
+
+        // Add cookies if available
+        const cookiesPath = path.join(__dirname, 'cookies.txt');
+        if (fs.existsSync(cookiesPath)) {
+            args.push('--cookies', cookiesPath);
+        }
+
+        args.push(`ytsearch15:${query}`);
+
+        const ytdlp = spawn('yt-dlp', args, { shell: false });
 
         let data = '';
-
-        ytdlp.stdout.on('data', (chunk) => {
-            data += chunk.toString();
-        });
+        ytdlp.stdout.on('data', (chunk) => { data += chunk.toString(); });
 
         ytdlp.on('close', (code) => {
             if (code !== 0 && !data) {
-                return res.status(500).json({ error: 'فشل في البحث' });
+                return res.status(500).json({ error: 'فشل في البحث', method: 'yt-dlp' });
             }
 
             try {
@@ -551,20 +590,80 @@ app.get('/api/search', async (req, res) => {
                             duration: video.duration_string || formatDuration(video.duration),
                             views: video.view_count
                         };
-                    } catch (e) {
-                        return null;
-                    }
+                    } catch (e) { return null; }
                 }).filter(Boolean);
 
-                res.json({ results });
+                res.json({ results, method: 'SafeSearch' });
             } catch (parseError) {
-                res.status(500).json({ error: 'فشل في تحليل النتائج' });
+                res.status(500).json({ error: 'فشل تحليل النتائج' });
             }
         });
     } catch (err) {
-        res.status(500).json({ error: 'خطأ في البحث' });
+        res.status(500).json({ error: 'خطأ في البحث: ' + err.message });
     }
 });
+
+// API: Trending (NEW)
+app.get('/api/trending', async (req, res) => {
+    const { region } = req.query; // e.g., 'SA', 'EG' (Not used by yt-dlp easily, but we can search trends)
+    // Note: yt-dlp doesn't support 'trending per region' easily via arguments, 
+    // but we can fetch the trending feed URL.
+
+    // Safer: Just search for generic trending terms or use a specific feed URL if known and supported.
+    // For simplicity and reliability on Cloud, we will use a general search for now or the feed URL.
+
+    // Let's use feed:trending if possible, otherwise fallback to search.
+    const feedUrl = 'https://www.youtube.com/feed/trending';
+
+    try {
+        const args = [
+            '--flat-playlist',
+            '--dump-json',
+            '--no-warnings',
+            '--playlist-end', '20',
+            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        ];
+
+        const cookiesPath = path.join(__dirname, 'cookies.txt');
+        if (fs.existsSync(cookiesPath)) {
+            args.push('--cookies', cookiesPath);
+        }
+
+        args.push(feedUrl);
+
+        const ytdlp = spawn('yt-dlp', args, { shell: false });
+
+        let data = '';
+        ytdlp.stdout.on('data', (chunk) => { data += chunk.toString(); });
+
+        ytdlp.on('close', (code) => {
+            if (!data) return res.json({ results: [] }); // Empty better than error
+
+            try {
+                const lines = data.trim().split('\n');
+                const results = lines.map(line => {
+                    try {
+                        const video = JSON.parse(line);
+                        return {
+                            url: video.url || `https://www.youtube.com/watch?v=${video.id}`,
+                            title: video.title,
+                            channel: video.channel || video.uploader,
+                            thumbnail: video.thumbnail || video.thumbnails?.[0]?.url,
+                            duration: video.duration_string || formatDuration(video.duration),
+                            views: video.view_count
+                        };
+                    } catch (e) { return null; }
+                }).filter(Boolean);
+                res.json({ results });
+            } catch (e) {
+                res.status(500).json({ error: 'Trending parse error' });
+            }
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 
 // API: Get Playlist Info
 app.get('/api/playlist', async (req, res) => {
@@ -575,12 +674,21 @@ app.get('/api/playlist', async (req, res) => {
     }
 
     try {
-        const ytdlp = spawn('yt-dlp', [
+        const args = [
             '--flat-playlist',
             '--dump-json',
             '--no-warnings',
-            url
-        ], { shell: true });
+            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        ];
+
+        const cookiesPath = path.join(__dirname, 'cookies.txt');
+        if (fs.existsSync(cookiesPath)) {
+            args.push('--cookies', cookiesPath);
+        }
+
+        args.push(url);
+
+        const ytdlp = spawn('yt-dlp', args, { shell: false });
 
         let data = '';
 
@@ -604,9 +712,7 @@ app.get('/api/playlist', async (req, res) => {
                             thumbnail: video.thumbnail || video.thumbnails?.[0]?.url,
                             duration: video.duration_string || formatDuration(video.duration)
                         };
-                    } catch (e) {
-                        return null;
-                    }
+                    } catch (e) { return null; }
                 }).filter(Boolean);
 
                 res.json({ videos, count: videos.length });
@@ -712,6 +818,7 @@ app.post('/api/tiktok/download', async (req, res) => {
             success: true,
             message: 'تم تحميل الفيديو بنجاح!',
             filename: filename,
+            downloadUrl: `/downloads/${filename}`,
             path: filePath
         });
     } catch (error) {
