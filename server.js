@@ -435,7 +435,7 @@ app.post('/api/download', async (req, res) => {
             }
 
             // SUCCESS HANDLER
-            downloadProgress.set(downloadId, { progress: 100, status: 'completed', speed: '', eta: '' });
+            downloadProgress.set(downloadId, { progress: 100, status: 'completed', speed: '', eta: '', filePath: finalFilePath });
 
             // AUTO UPLOAD LOGIC
             // Check if user requested auto-upload and we captured the filepath
@@ -490,6 +490,53 @@ app.get('/api/progress/:id', (req, res) => {
     }
 
     res.json(progress);
+});
+
+// API: Download completed file to user's browser
+app.get('/api/download-file/:id', (req, res) => {
+    const { id } = req.params;
+    const progress = downloadProgress.get(id);
+
+    if (!progress) {
+        return res.status(404).json({ error: 'التحميل غير موجود' });
+    }
+
+    if (progress.status !== 'completed') {
+        return res.status(400).json({ error: 'التحميل لم يكتمل بعد', status: progress.status });
+    }
+
+    const filePath = progress.filePath;
+    if (!filePath || !fs.existsSync(filePath)) {
+        return res.status(404).json({ error: 'الملف غير موجود على السيرفر' });
+    }
+
+    // Get filename for download header
+    const filename = path.basename(filePath);
+
+    // Set headers for file download
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
+    res.setHeader('Content-Type', 'application/octet-stream');
+
+    // Stream the file to the user
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
+
+    fileStream.on('error', (err) => {
+        console.error('File stream error:', err);
+        res.status(500).json({ error: 'خطأ في إرسال الملف' });
+    });
+
+    // Optional: Delete file after download (to save space on free tier)
+    fileStream.on('end', () => {
+        setTimeout(() => {
+            try {
+                fs.unlinkSync(filePath);
+                console.log('🗑️ Cleaned up file:', filePath);
+            } catch (e) {
+                // File may already be deleted or in use
+            }
+        }, 5000);
+    });
 });
 
 // API: Check yt-dlp and ffmpeg installation
