@@ -91,6 +91,16 @@ app.get('/api/info', async (req, res) => {
     console.log('Fetching info for:', url);
 
     try {
+        // Check if cookies file exists
+        const cookiesPath = path.join(__dirname, 'cookies.txt');
+        const hasCookies = fs.existsSync(cookiesPath);
+
+        if (hasCookies) {
+            console.log('✅ Using cookies.txt for authentication');
+        } else {
+            console.log('⚠️ No cookies.txt found - some videos may fail');
+        }
+
         // Cloud-compatible options for yt-dlp
         const args = [
             '--dump-json',
@@ -109,8 +119,14 @@ app.get('/api/info', async (req, res) => {
             '--force-ipv4',
             // Important for TikTok, Instagram, etc.
             '--extractor-args', 'tiktok:api_hostname=api22-normal-c-useast1a.tiktokv.com',
-            url
         ];
+
+        // Add cookies if available (CRITICAL for YouTube on cloud servers)
+        if (hasCookies) {
+            args.push('--cookies', cookiesPath);
+        }
+
+        args.push(url);
 
         console.log('Running yt-dlp with cloud workarounds...');
         const ytdlp = spawn('yt-dlp', args, { shell: false });
@@ -244,6 +260,10 @@ app.post('/api/download', async (req, res) => {
         }
     }
 
+    // Check if cookies file exists
+    const cookiesPath = path.join(__dirname, 'cookies.txt');
+    const hasCookies = fs.existsSync(cookiesPath);
+
     // Build command arguments
     const args = [
         '--newline',
@@ -258,6 +278,11 @@ app.post('/api/download', async (req, res) => {
         '--force-ipv4',
         '-o', path.join(downloadPath, outputTemplate),
     ];
+
+    // Add cookies if available (CRITICAL for YouTube on cloud)
+    if (hasCookies) {
+        args.push('--cookies', cookiesPath);
+    }
 
     // Quality/Format
     if (audioOnly) {
