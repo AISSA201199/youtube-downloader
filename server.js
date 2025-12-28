@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = 3000;
 
 // ===== TikTok Support via Cobalt API & TikWM =====
 async function downloadTikTokViaCobalt(url) {
@@ -80,48 +80,6 @@ app.use(express.static('public'));
 // Store download progress
 const downloadProgress = new Map();
 
-// Download via Cobalt for YouTube (bypasses bot detection)
-async function downloadViaCobalt(url, quality = '1080') {
-    try {
-        console.log('🚀 Using Cobalt API for:', url);
-        const response = await fetch('https://api.cobalt.tools/api/json', {
-            method: 'POST',
-            headers: {
-                'Accept': 'application/json',
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                url: url,
-                vCodec: 'h264',
-                vQuality: quality,
-                aFormat: 'mp3',
-                isNoTTWatermark: true
-            })
-        });
-
-        const data = await response.json();
-        console.log('Cobalt response:', data.status);
-
-        if (data && (data.url || data.stream)) {
-            return {
-                success: true,
-                url: data.url || data.stream,
-                status: data.status,
-                filename: data.filename
-            };
-        }
-        return { success: false, error: data.text || 'Cobalt failed' };
-    } catch (error) {
-        console.error('Cobalt API error:', error.message);
-        return { success: false, error: error.message };
-    }
-}
-
-// Check if URL is YouTube
-function isYouTubeUrl(url) {
-    return url.includes('youtube.com') || url.includes('youtu.be');
-}
-
 // API: Get video information (supports all sites)
 app.get('/api/info', async (req, res) => {
     const { url } = req.query;
@@ -132,82 +90,26 @@ app.get('/api/info', async (req, res) => {
 
     console.log('Fetching info for:', url);
 
-    // For YouTube: Try Cobalt first (more reliable on cloud servers)
-    if (isYouTubeUrl(url)) {
-        console.log('🎬 YouTube detected - using Cobalt API');
-        const cobaltResult = await downloadViaCobalt(url);
-
-        if (cobaltResult.success) {
-            // Extract video ID for thumbnail
-            const videoIdMatch = url.match(/(?:v=|youtu\.be\/)([^&]+)/);
-            const videoId = videoIdMatch ? videoIdMatch[1] : '';
-
-            return res.json({
-                title: 'YouTube Video',
-                thumbnail: videoId ? `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg` : '',
-                duration: 0,
-                duration_string: '--:--',
-                channel: 'YouTube',
-                view_count: 0,
-                like_count: 0,
-                upload_date: '',
-                description: '',
-                qualities: [
-                    { id: 'best', label: 'أفضل جودة متاحة' },
-                    { id: '1080', label: '1080p HD' },
-                    { id: '720', label: '720p' },
-                    { id: '480', label: '480p' },
-                    { id: 'bestaudio', label: '🎵 صوت فقط (MP3)' }
-                ],
-                is_live: false,
-                extractor: 'cobalt',
-                cobalt_url: cobaltResult.url // Direct download URL from Cobalt
-            });
-        }
-        console.log('⚠️ Cobalt failed, trying yt-dlp...');
-    }
-
     try {
-        // Check if cookies file exists
-        const cookiesPath = path.join(__dirname, 'cookies.txt');
-        const hasCookies = fs.existsSync(cookiesPath);
-
-        if (hasCookies) {
-            console.log('✅ Using cookies.txt for authentication');
-        } else {
-            console.log('⚠️ No cookies.txt found - some videos may fail');
-        }
-
-        // Cloud-compatible options for yt-dlp
+        // Use more compatible options for all sites
         const args = [
             '--dump-json',
             '--no-playlist',
             '--no-warnings',
             '--ignore-errors',
-            // CLOUD WORKAROUNDS - Critical for Render/Heroku/etc
-            '--geo-bypass',
-            '--geo-bypass-country', 'US',
-            '--extractor-retries', '3',
-            '--retry-sleep', '3',
-            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            '--referer', 'https://www.youtube.com/',
-            '--add-header', 'Accept-Language:en-US,en;q=0.9',
-            // Force IPv4 (some cloud providers have IPv6 issues)
-            '--force-ipv4',
-            // YOUTUBE: Use Android client to bypass bot detection
-            '--extractor-args', 'youtube:player_client=android,web',
             // Important for TikTok, Instagram, etc.
             '--extractor-args', 'tiktok:api_hostname=api22-normal-c-useast1a.tiktokv.com',
         ];
 
-        // Add cookies if available (CRITICAL for YouTube on cloud servers)
-        if (hasCookies) {
+        // Add cookies if available
+        const cookiesPath = path.join(__dirname, 'cookies.txt');
+        if (fs.existsSync(cookiesPath)) {
+            console.log('✅ Using cookies.txt');
             args.push('--cookies', cookiesPath);
         }
 
         args.push(url);
 
-        console.log('Running yt-dlp with cloud workarounds...');
         const ytdlp = spawn('yt-dlp', args, { shell: false });
 
         let data = '';
@@ -227,24 +129,9 @@ app.get('/api/info', async (req, res) => {
 
             if (code !== 0 && !data) {
                 console.log('Error:', errorData);
-
-                // Better error messages for common issues
-                let errorMessage = 'فشل في جلب معلومات الفيديو.';
-                if (errorData.includes('Video unavailable')) {
-                    errorMessage = 'الفيديو غير متاح أو خاص.';
-                } else if (errorData.includes('age-restricted')) {
-                    errorMessage = 'الفيديو مقيد بالعمر. جرب استخدام cookies.';
-                } else if (errorData.includes('blocked')) {
-                    errorMessage = 'الفيديو محظور في بلدك.';
-                } else if (errorData.includes('private')) {
-                    errorMessage = 'الفيديو خاص ولا يمكن الوصول إليه.';
-                } else if (errorData.includes('Sign in')) {
-                    errorMessage = 'يتطلب تسجيل الدخول. جرب فيديو آخر.';
-                }
-
                 return res.status(500).json({
-                    error: errorMessage,
-                    details: errorData.substring(0, 300)
+                    error: 'فشل في جلب معلومات الفيديو. تأكد من صحة الرابط وأن yt-dlp محدث.',
+                    details: errorData.substring(0, 200)
                 });
             }
 
@@ -339,29 +226,18 @@ app.post('/api/download', async (req, res) => {
         }
     }
 
-    // Check if cookies file exists
-    const cookiesPath = path.join(__dirname, 'cookies.txt');
-    const hasCookies = fs.existsSync(cookiesPath);
-
     // Build command arguments
     const args = [
         '--newline',
         '--progress',
         '--no-warnings',
         '--windows-filenames', // Safe filenames for Windows (better than restrict-filenames)
-        // CLOUD WORKAROUNDS
-        '--geo-bypass',
-        '--geo-bypass-country', 'US',
-        '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        '--referer', 'https://www.youtube.com/',
-        '--force-ipv4',
-        // YOUTUBE: Use Android client to bypass bot detection
-        '--extractor-args', 'youtube:player_client=android,web',
         '-o', path.join(downloadPath, outputTemplate),
     ];
 
-    // Add cookies if available (CRITICAL for YouTube on cloud)
-    if (hasCookies) {
+    // Add cookies if available
+    const cookiesPath = path.join(__dirname, 'cookies.txt');
+    if (fs.existsSync(cookiesPath)) {
         args.push('--cookies', cookiesPath);
     }
 
@@ -573,7 +449,7 @@ app.post('/api/download', async (req, res) => {
             }
 
             // SUCCESS HANDLER
-            downloadProgress.set(downloadId, { progress: 100, status: 'completed', speed: '', eta: '', filePath: finalFilePath });
+            downloadProgress.set(downloadId, { progress: 100, status: 'completed', speed: '', eta: '' });
 
             // AUTO UPLOAD LOGIC
             // Check if user requested auto-upload and we captured the filepath
@@ -628,53 +504,6 @@ app.get('/api/progress/:id', (req, res) => {
     }
 
     res.json(progress);
-});
-
-// API: Download completed file to user's browser
-app.get('/api/download-file/:id', (req, res) => {
-    const { id } = req.params;
-    const progress = downloadProgress.get(id);
-
-    if (!progress) {
-        return res.status(404).json({ error: 'التحميل غير موجود' });
-    }
-
-    if (progress.status !== 'completed') {
-        return res.status(400).json({ error: 'التحميل لم يكتمل بعد', status: progress.status });
-    }
-
-    const filePath = progress.filePath;
-    if (!filePath || !fs.existsSync(filePath)) {
-        return res.status(404).json({ error: 'الملف غير موجود على السيرفر' });
-    }
-
-    // Get filename for download header
-    const filename = path.basename(filePath);
-
-    // Set headers for file download
-    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
-    res.setHeader('Content-Type', 'application/octet-stream');
-
-    // Stream the file to the user
-    const fileStream = fs.createReadStream(filePath);
-    fileStream.pipe(res);
-
-    fileStream.on('error', (err) => {
-        console.error('File stream error:', err);
-        res.status(500).json({ error: 'خطأ في إرسال الملف' });
-    });
-
-    // Optional: Delete file after download (to save space on free tier)
-    fileStream.on('end', () => {
-        setTimeout(() => {
-            try {
-                fs.unlinkSync(filePath);
-                console.log('🗑️ Cleaned up file:', filePath);
-            } catch (e) {
-                // File may already be deleted or in use
-            }
-        }, 5000);
-    });
 });
 
 // API: Check yt-dlp and ffmpeg installation
@@ -866,56 +695,43 @@ app.post('/api/tiktok/download', async (req, res) => {
 
     console.log('Downloading TikTok via Cobalt:', url);
 
-    // Create download ID for tracking
-    const downloadId = Date.now().toString();
-    downloadProgress.set(downloadId, { progress: 0, status: 'starting', speed: '', eta: '' });
+    try {
+        const cobaltData = await downloadTikTokViaCobalt(url);
 
-    // Send response immediately with downloadId
-    res.json({ downloadId, success: true, message: 'بدأ تحميل TikTok' });
-
-    // Download in background
-    (async () => {
-        try {
-            downloadProgress.set(downloadId, { progress: 30, status: 'fetching', speed: 'جلب الرابط...', eta: '' });
-
-            const cobaltData = await downloadTikTokViaCobalt(url);
-
-            if (!cobaltData || cobaltData.status === 'error') {
-                downloadProgress.set(downloadId, { progress: 0, status: 'error', error: 'فشل في تحميل الفيديو' });
-                return;
-            }
-
-            const downloadUrl = cobaltData.url || cobaltData.audio;
-
-            if (!downloadUrl) {
-                downloadProgress.set(downloadId, { progress: 0, status: 'error', error: 'لم يتم العثور على رابط التحميل' });
-                return;
-            }
-
-            downloadProgress.set(downloadId, { progress: 50, status: 'downloading', speed: 'جاري التحميل...', eta: '' });
-
-            // Download the file
-            const downloadPath = outputPath || path.join(__dirname, 'downloads');
-            if (!fs.existsSync(downloadPath)) {
-                fs.mkdirSync(downloadPath, { recursive: true });
-            }
-
-            const filename = `tiktok_${Date.now()}.mp4`;
-            const filePath = path.join(downloadPath, filename);
-
-            // Use fetch to download
-            const fileResponse = await fetch(downloadUrl);
-            const buffer = await fileResponse.arrayBuffer();
-            fs.writeFileSync(filePath, Buffer.from(buffer));
-
-            downloadProgress.set(downloadId, { progress: 100, status: 'completed', speed: '', eta: '', filePath: filePath });
-            console.log('✅ TikTok download completed:', filePath);
-
-        } catch (error) {
-            console.error('TikTok download error:', error);
-            downloadProgress.set(downloadId, { progress: 0, status: 'error', error: 'خطأ في التحميل: ' + error.message });
+        if (!cobaltData || cobaltData.status === 'error') {
+            return res.status(500).json({ error: 'فشل في تحميل الفيديو' });
         }
-    })();
+
+        const downloadUrl = cobaltData.url || cobaltData.audio;
+
+        if (!downloadUrl) {
+            return res.status(500).json({ error: 'لم يتم العثور على رابط التحميل' });
+        }
+
+        // Download the file
+        const downloadPath = outputPath || path.join(__dirname, 'downloads');
+        if (!fs.existsSync(downloadPath)) {
+            fs.mkdirSync(downloadPath, { recursive: true });
+        }
+
+        const filename = `tiktok_${Date.now()}.mp4`;
+        const filePath = path.join(downloadPath, filename);
+
+        // Use fetch to download
+        const fileResponse = await fetch(downloadUrl);
+        const buffer = await fileResponse.arrayBuffer();
+        fs.writeFileSync(filePath, Buffer.from(buffer));
+
+        res.json({
+            success: true,
+            message: 'تم تحميل الفيديو بنجاح!',
+            filename: filename,
+            path: filePath
+        });
+    } catch (error) {
+        console.error('TikTok download error:', error);
+        res.status(500).json({ error: 'خطأ في التحميل: ' + error.message });
+    }
 });
 
 // ===== API Keys =====
@@ -1436,18 +1252,8 @@ app.post('/api/extract/subtitles', async (req, res) => {
 
 // ===== ADVANCED FEATURES =====
 
-// Tool Paths - Cross-Platform (Works on Windows locally and Linux on cloud)
-const isCloud = process.env.NODE_ENV === 'production' || process.env.RENDER;
-
-const TOOLS = isCloud ? {
-    // Linux/Cloud paths (Render.com)
-    aria2c: 'aria2c',
-    gallery_dl: 'gallery-dl',
-    spotdl: 'spotdl',
-    python: 'python3',
-    ytdlp: 'yt-dlp'
-} : {
-    // Windows local paths
+// Tool Paths (Detected & Verified)
+const TOOLS = {
     aria2c: 'C:\\ProgramData\\chocolatey\\bin\\aria2c.exe',
     gallery_dl: 'C:\\Python314\\Scripts\\gallery-dl.exe',
     spotdl: 'C:\\Users\\gg997\\AppData\\Roaming\\Python\\Python314\\Scripts\\spotdl.exe',
