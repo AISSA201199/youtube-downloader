@@ -728,43 +728,56 @@ app.post('/api/tiktok/download', async (req, res) => {
 
     console.log('Downloading TikTok via Cobalt:', url);
 
-    try {
-        const cobaltData = await downloadTikTokViaCobalt(url);
+    // Create download ID for tracking
+    const downloadId = Date.now().toString();
+    downloadProgress.set(downloadId, { progress: 0, status: 'starting', speed: '', eta: '' });
 
-        if (!cobaltData || cobaltData.status === 'error') {
-            return res.status(500).json({ error: 'فشل في تحميل الفيديو' });
+    // Send response immediately with downloadId
+    res.json({ downloadId, success: true, message: 'بدأ تحميل TikTok' });
+
+    // Download in background
+    (async () => {
+        try {
+            downloadProgress.set(downloadId, { progress: 30, status: 'fetching', speed: 'جلب الرابط...', eta: '' });
+
+            const cobaltData = await downloadTikTokViaCobalt(url);
+
+            if (!cobaltData || cobaltData.status === 'error') {
+                downloadProgress.set(downloadId, { progress: 0, status: 'error', error: 'فشل في تحميل الفيديو' });
+                return;
+            }
+
+            const downloadUrl = cobaltData.url || cobaltData.audio;
+
+            if (!downloadUrl) {
+                downloadProgress.set(downloadId, { progress: 0, status: 'error', error: 'لم يتم العثور على رابط التحميل' });
+                return;
+            }
+
+            downloadProgress.set(downloadId, { progress: 50, status: 'downloading', speed: 'جاري التحميل...', eta: '' });
+
+            // Download the file
+            const downloadPath = outputPath || path.join(__dirname, 'downloads');
+            if (!fs.existsSync(downloadPath)) {
+                fs.mkdirSync(downloadPath, { recursive: true });
+            }
+
+            const filename = `tiktok_${Date.now()}.mp4`;
+            const filePath = path.join(downloadPath, filename);
+
+            // Use fetch to download
+            const fileResponse = await fetch(downloadUrl);
+            const buffer = await fileResponse.arrayBuffer();
+            fs.writeFileSync(filePath, Buffer.from(buffer));
+
+            downloadProgress.set(downloadId, { progress: 100, status: 'completed', speed: '', eta: '', filePath: filePath });
+            console.log('✅ TikTok download completed:', filePath);
+
+        } catch (error) {
+            console.error('TikTok download error:', error);
+            downloadProgress.set(downloadId, { progress: 0, status: 'error', error: 'خطأ في التحميل: ' + error.message });
         }
-
-        const downloadUrl = cobaltData.url || cobaltData.audio;
-
-        if (!downloadUrl) {
-            return res.status(500).json({ error: 'لم يتم العثور على رابط التحميل' });
-        }
-
-        // Download the file
-        const downloadPath = outputPath || path.join(__dirname, 'downloads');
-        if (!fs.existsSync(downloadPath)) {
-            fs.mkdirSync(downloadPath, { recursive: true });
-        }
-
-        const filename = `tiktok_${Date.now()}.mp4`;
-        const filePath = path.join(downloadPath, filename);
-
-        // Use fetch to download
-        const fileResponse = await fetch(downloadUrl);
-        const buffer = await fileResponse.arrayBuffer();
-        fs.writeFileSync(filePath, Buffer.from(buffer));
-
-        res.json({
-            success: true,
-            message: 'تم تحميل الفيديو بنجاح!',
-            filename: filename,
-            path: filePath
-        });
-    } catch (error) {
-        console.error('TikTok download error:', error);
-        res.status(500).json({ error: 'خطأ في التحميل: ' + error.message });
-    }
+    })();
 });
 
 // ===== API Keys =====
