@@ -530,6 +530,26 @@ async function startDownload() {
     try {
         let response, data;
 
+        // تحميل خاص لـ YouTube via Cobalt (تجاوز حماية البوت)
+        if ((url.includes('youtube.com') || url.includes('youtu.be')) && state.currentVideo?.cobalt_url) {
+            updateProgress(50, 'جاري التحميل من YouTube...', '⚡ Cobalt', '', '');
+
+            // Direct download from Cobalt URL
+            const a = document.createElement('a');
+            a.href = state.currentVideo.cobalt_url;
+            a.download = 'youtube_video.mp4';
+            a.target = '_blank';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+
+            updateProgress(100, 'اكتمل!', '', '', '');
+            setTimeout(() => {
+                downloadCompleted();
+            }, 1000);
+            return;
+        }
+
         // تحميل خاص لـ TikTok
         if (url.includes('tiktok.com') || url.includes('vm.tiktok.com')) {
             updateProgress(10, 'جاري تحميل من TikTok...', '⚡ Cobalt', '', '');
