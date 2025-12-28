@@ -692,6 +692,9 @@ function downloadCompleted() {
             showDesktopNotification('تم التحميل! 🎉', state.currentVideo.title);
             if (state.settings.soundOnComplete) playSound();
         }
+
+        // Re-enable download button for next download
+        $('downloadBtn').disabled = false;
     }, 500);
 }
 
