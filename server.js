@@ -99,16 +99,8 @@ app.get('/api/info', async (req, res) => {
             '--ignore-errors',
             // Important for TikTok, Instagram, etc.
             '--extractor-args', 'tiktok:api_hostname=api22-normal-c-useast1a.tiktokv.com',
+            url
         ];
-
-        // Add cookies if available
-        const cookiesPath = path.join(__dirname, 'cookies.txt');
-        if (fs.existsSync(cookiesPath)) {
-            console.log('✅ Using cookies.txt');
-            args.push('--cookies', cookiesPath);
-        }
-
-        args.push(url);
 
         const ytdlp = spawn('yt-dlp', args, { shell: false });
 
@@ -234,12 +226,6 @@ app.post('/api/download', async (req, res) => {
         '--windows-filenames', // Safe filenames for Windows (better than restrict-filenames)
         '-o', path.join(downloadPath, outputTemplate),
     ];
-
-    // Add cookies if available
-    const cookiesPath = path.join(__dirname, 'cookies.txt');
-    if (fs.existsSync(cookiesPath)) {
-        args.push('--cookies', cookiesPath);
-    }
 
     // Quality/Format
     if (audioOnly) {

@@ -36,7 +36,7 @@ const state = {
     }
 };
 
-const API_BASE = '/api';
+const API_BASE = 'http://localhost:3000/api';
 
 // ===== DOM Elements Cache =====
 const $ = (id) => document.getElementById(id);
@@ -532,7 +532,7 @@ async function startDownload() {
 
         // تحميل خاص لـ TikTok
         if (url.includes('tiktok.com') || url.includes('vm.tiktok.com')) {
-            updateProgress(10, 'جاري تحميل من TikTok...', '⚡ Cobalt', '', '');
+            updateProgress(50, 'جاري تحميل من TikTok...', '⚡ Cobalt', '', '');
 
             response = await fetch(`${API_BASE}/tiktok/download`, {
                 method: 'POST',
@@ -542,13 +542,13 @@ async function startDownload() {
 
             data = await response.json();
 
-            if (!response.ok || !data.downloadId) {
+            if (!response.ok || !data.success) {
                 throw new Error(data.error || 'فشل تحميل TikTok');
             }
 
-            // Use same polling as regular downloads
-            state.currentDownloadId = data.downloadId;
-            startProgressPolling();
+            // TikTok download is usually instant
+            updateProgress(100, 'اكتمل!', '', '', '');
+            downloadCompleted();
             return;
         }
 
@@ -671,17 +671,6 @@ function downloadCompleted() {
     addToHistory(state.currentVideo);
     updateStats();
 
-    // Trigger file download to user's browser
-    if (state.currentDownloadId) {
-        const downloadUrl = `${API_BASE}/download-file/${state.currentDownloadId}`;
-        const a = document.createElement('a');
-        a.href = downloadUrl;
-        a.download = '';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-    }
-
     setTimeout(() => {
         hide('progressSection');
         show('successSection');
@@ -692,9 +681,6 @@ function downloadCompleted() {
             showDesktopNotification('تم التحميل! 🎉', state.currentVideo.title);
             if (state.settings.soundOnComplete) playSound();
         }
-
-        // Re-enable download button for next download
-        $('downloadBtn').disabled = false;
     }, 500);
 }
 
