@@ -80,6 +80,48 @@ app.use(express.static('public'));
 // Store download progress
 const downloadProgress = new Map();
 
+// Download via Cobalt for YouTube (bypasses bot detection)
+async function downloadViaCobalt(url, quality = '1080') {
+    try {
+        console.log('🚀 Using Cobalt API for:', url);
+        const response = await fetch('https://api.cobalt.tools/api/json', {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                url: url,
+                vCodec: 'h264',
+                vQuality: quality,
+                aFormat: 'mp3',
+                isNoTTWatermark: true
+            })
+        });
+
+        const data = await response.json();
+        console.log('Cobalt response:', data.status);
+
+        if (data && (data.url || data.stream)) {
+            return {
+                success: true,
+                url: data.url || data.stream,
+                status: data.status,
+                filename: data.filename
+            };
+        }
+        return { success: false, error: data.text || 'Cobalt failed' };
+    } catch (error) {
+        console.error('Cobalt API error:', error.message);
+        return { success: false, error: error.message };
+    }
+}
+
+// Check if URL is YouTube
+function isYouTubeUrl(url) {
+    return url.includes('youtube.com') || url.includes('youtu.be');
+}
+
 // API: Get video information (supports all sites)
 app.get('/api/info', async (req, res) => {
     const { url } = req.query;
@@ -89,6 +131,41 @@ app.get('/api/info', async (req, res) => {
     }
 
     console.log('Fetching info for:', url);
+
+    // For YouTube: Try Cobalt first (more reliable on cloud servers)
+    if (isYouTubeUrl(url)) {
+        console.log('🎬 YouTube detected - using Cobalt API');
+        const cobaltResult = await downloadViaCobalt(url);
+
+        if (cobaltResult.success) {
+            // Extract video ID for thumbnail
+            const videoIdMatch = url.match(/(?:v=|youtu\.be\/)([^&]+)/);
+            const videoId = videoIdMatch ? videoIdMatch[1] : '';
+
+            return res.json({
+                title: 'YouTube Video',
+                thumbnail: videoId ? `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg` : '',
+                duration: 0,
+                duration_string: '--:--',
+                channel: 'YouTube',
+                view_count: 0,
+                like_count: 0,
+                upload_date: '',
+                description: '',
+                qualities: [
+                    { id: 'best', label: 'أفضل جودة متاحة' },
+                    { id: '1080', label: '1080p HD' },
+                    { id: '720', label: '720p' },
+                    { id: '480', label: '480p' },
+                    { id: 'bestaudio', label: '🎵 صوت فقط (MP3)' }
+                ],
+                is_live: false,
+                extractor: 'cobalt',
+                cobalt_url: cobaltResult.url // Direct download URL from Cobalt
+            });
+        }
+        console.log('⚠️ Cobalt failed, trying yt-dlp...');
+    }
 
     try {
         // Check if cookies file exists
