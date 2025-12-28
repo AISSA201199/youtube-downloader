@@ -1348,13 +1348,14 @@ app.post('/api/extract/subtitles', async (req, res) => {
 
 // ===== ADVANCED FEATURES =====
 
-// Tool Paths (Detected & Verified)
+// Tool Paths (Auto-detect based on OS)
+const isWindows = process.platform === 'win32';
 const TOOLS = {
-    aria2c: 'C:\\ProgramData\\chocolatey\\bin\\aria2c.exe',
-    gallery_dl: 'C:\\Python314\\Scripts\\gallery-dl.exe',
-    spotdl: 'C:\\Users\\gg997\\AppData\\Roaming\\Python\\Python314\\Scripts\\spotdl.exe',
-    python: 'C:\\Python314\\python.exe',
-    ytdlp: 'C:\\Windows\\system32\\yt-dlp.exe'
+    aria2c: isWindows ? 'C:\\ProgramData\\chocolatey\\bin\\aria2c.exe' : 'aria2c',
+    gallery_dl: isWindows ? 'C:\\Python314\\Scripts\\gallery-dl.exe' : 'gallery-dl',
+    spotdl: isWindows ? 'C:\\Users\\gg997\\AppData\\Roaming\\Python\\Python314\\Scripts\\spotdl.exe' : 'spotdl',
+    python: isWindows ? 'C:\\Python314\\python.exe' : 'python3',
+    ytdlp: isWindows ? 'C:\\Windows\\system32\\yt-dlp.exe' : 'yt-dlp'
 };
 
 // 1. Fast Download with aria2 (5-10x faster) & Queue Support
