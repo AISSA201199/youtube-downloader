@@ -10,8 +10,8 @@ RUN apk add --no-cache \
     bash \
     curl
 
-# Install yt-dlp
-RUN pip3 install --break-system-packages yt-dlp
+# Install yt-dlp (nightly version for latest YouTube fixes)
+RUN pip3 install --break-system-packages --upgrade "yt-dlp[default] @ https://github.com/yt-dlp/yt-dlp/archive/master.tar.gz"
 
 # Create app directory
 WORKDIR /app
