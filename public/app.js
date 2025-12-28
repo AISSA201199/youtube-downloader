@@ -532,7 +532,7 @@ async function startDownload() {
 
         // تحميل خاص لـ TikTok
         if (url.includes('tiktok.com') || url.includes('vm.tiktok.com')) {
-            updateProgress(50, 'جاري تحميل من TikTok...', '⚡ Cobalt', '', '');
+            updateProgress(10, 'جاري تحميل من TikTok...', '⚡ Cobalt', '', '');
 
             response = await fetch(`${API_BASE}/tiktok/download`, {
                 method: 'POST',
@@ -542,13 +542,13 @@ async function startDownload() {
 
             data = await response.json();
 
-            if (!response.ok || !data.success) {
+            if (!response.ok || !data.downloadId) {
                 throw new Error(data.error || 'فشل تحميل TikTok');
             }
 
-            // TikTok download is usually instant
-            updateProgress(100, 'اكتمل!', '', '', '');
-            downloadCompleted();
+            // Use same polling as regular downloads
+            state.currentDownloadId = data.downloadId;
+            startProgressPolling();
             return;
         }
 
