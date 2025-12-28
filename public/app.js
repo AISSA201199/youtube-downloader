@@ -507,6 +507,35 @@ function displayVideoInfo(data) {
     setTimeout(() => show('downloadOptions'), 100);
 }
 
+// ===== Download Completed Handler =====
+function downloadCompleted(downloadUrl) {
+    console.log('📥 Download completed, opening:', downloadUrl);
+
+    // Hide progress, show success
+    hide('progressSection');
+    show('downloadOptions');
+    $('downloadBtn').disabled = false;
+
+    // Show success notification
+    showNotification('success', 'تم التحميل!', 'جاري فتح رابط التحميل...');
+
+    // Open the download URL
+    if (downloadUrl.startsWith('http')) {
+        // External URL - open in new tab
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.download = '';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    } else {
+        // Local server URL
+        window.open(downloadUrl, '_blank');
+    }
+}
+
 // ===== Download =====
 async function startDownload() {
     const activePanel = document.querySelector('.option-panel.active')?.id;
