@@ -529,30 +529,43 @@ async function startDownload() {
 
     try {
         let response, data;
+        const isYouTube = url.includes('youtube.com') || url.includes('youtu.be');
+        const isTikTok = url.includes('tiktok.com') || url.includes('vm.tiktok.com');
 
-        // تحميل خاص لـ TikTok
-        if (url.includes('tiktok.com') || url.includes('vm.tiktok.com')) {
-            updateProgress(50, 'جاري تحميل من TikTok...', '⚡ Cobalt', '', '');
+        // Try Cobalt API first for YouTube and TikTok (bypasses cloud restrictions)
+        if (isYouTube || isTikTok) {
+            updateProgress(30, 'جاري التحميل السريع...', '⚡ Cobalt', '', '');
 
-            response = await fetch(`${API_BASE}/tiktok/download`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url })
-            });
+            try {
+                response = await fetch(`${API_BASE}/download/cobalt`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        url,
+                        quality: $('quality')?.value || 'best',
+                        audioOnly: downloadType === 'audio'
+                    })
+                });
 
-            data = await response.json();
+                data = await response.json();
 
-            if (!response.ok || !data.success) {
-                console.warn('TikTok API failed, falling back to yt-dlp...');
-                // Fallthrough to normal download
-            } else {
-                updateProgress(100, 'اكتمل!', '', '', '');
-                downloadCompleted(data.downloadUrl);
-                return;
+                if (response.ok && data.success && data.downloadUrl) {
+                    console.log('✅ Cobalt download success');
+                    updateProgress(100, 'اكتمل!', '', '', '');
+                    downloadCompleted(data.downloadUrl);
+                    return;
+                }
+
+                console.warn('Cobalt failed, trying fallback...', data.error);
+            } catch (cobaltErr) {
+                console.warn('Cobalt request failed:', cobaltErr.message);
             }
+
+            // Show fallback message
+            updateProgress(40, 'جاري المحاولة بطريقة بديلة...', '', '', '');
         }
 
-        // التحميل العادي
+        // Fallback: التحميل العادي عبر yt-dlp
         const options = buildDownloadOptions(downloadType);
         response = await fetch(`${API_BASE}/download`, {
             method: 'POST',
