@@ -103,6 +103,9 @@ app.get('/api/info', async (req, res) => {
             '--no-playlist',
             '--no-warnings',
             '--ignore-errors',
+            '--geo-bypass',
+            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            '--referer', 'https://www.google.com/',
             // Important for TikTok, Instagram, etc.
             '--extractor-args', 'tiktok:api_hostname=api22-normal-c-useast1a.tiktokv.com',
         ];
